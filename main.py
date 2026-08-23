@@ -1,6 +1,7 @@
 from openai import OpenAI
 from datetime import datetime
 import os
+import json
 
 client = OpenAI(
     base_url="http://192.168.100.2:1234/v1",
@@ -16,17 +17,20 @@ def list_files(path="."):
     except Exception as e:
         return f"Eroare: {e}"
 
+def read_file(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        return f"Eroare: {e}"
+
 tools = [
     {
         "type": "function",
         "function": {
             "name": "get_current_time",
             "description": "Returnează ora actuală",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
+            "parameters": {"type": "object", "properties": {}, "required": []}
         }
     },
     {
@@ -37,12 +41,23 @@ tools = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Calea folderului (implicit .)"
-                    }
+                    "path": {"type": "string", "description": "Calea folderului"}
                 },
                 "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_file",
+            "description": "Citește conținutul unui fișier text",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Calea fișierului"}
+                },
+                "required": ["path"]
             }
         }
     }
@@ -50,14 +65,8 @@ tools = [
 
 def run_agent(user_message: str):
     messages = [
-        {
-            "role": "system",
-            "content": "Esti un agent AI. Foloseste tool-urile disponibile cand e nevoie."
-        },
-        {
-            "role": "user",
-            "content": user_message
-        }
+        {"role": "system", "content": "Esti un agent AI. Foloseste tool-urile cand e nevoie."},
+        {"role": "user", "content": user_message}
     ]
 
     while True:
@@ -76,14 +85,14 @@ def run_agent(user_message: str):
 
         for tool_call in message.tool_calls:
             name = tool_call.function.name
-            args = tool_call.function.arguments
+            args = json.loads(tool_call.function.arguments or "{}")
 
             if name == "get_current_time":
                 result = get_current_time()
             elif name == "list_files":
-                import json
-                path = json.loads(args).get("path", ".")
-                result = list_files(path)
+                result = list_files(args.get("path", "."))
+            elif name == "read_file":
+                result = read_file(args.get("path", ""))
             else:
                 result = "Tool necunoscut"
 
@@ -94,4 +103,4 @@ def run_agent(user_message: str):
             })
 
 if __name__ == "__main__":
-    print(run_agent("Listează fișierele din folderul curent și spune-mi ora."))
+    print(run_agent("Citește main.py și spune-mi pe scurt ce face."))
