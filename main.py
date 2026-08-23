@@ -18,38 +18,7 @@ MODELS = {
 }
 
 
-# --- Model Router Inteligent (LLM-based) ---
-def choose_model(task: str) -> str:
-    router_prompt = """Ești un router de sarcini AI. Analizează mesajul utilizatorului și clasifică-l într-una din categorii:
-- "fast": Întrebări simple, saluturi, cereri rapide de timp, liste scurte.
-- "general": Explicații, analize, scriere de cod, reasoning, întrebări structurate.
-- "large": Task-uri matematice complexe, refactoring masiv de cod, logică grea.
-
-Răspunde STRICT cu un singur cuvânt: fast, general, sau large."""
-
-    try:
-        response = client.chat.completions.create(
-            model=MODELS["fast"],
-            messages=[
-                {"role": "system", "content": router_prompt},
-                {"role": "user", "content": task},
-            ],
-            temperature=0.0,
-        )
-
-        category = response.choices[0].message.content.strip().lower()
-
-        for key in MODELS.keys():
-            if key in category:
-                return MODELS[key]
-
-    except Exception as e:
-        print(f"[Router Warning] Fallback pe general: {e}")
-
-    return MODELS["general"]
-
-
-# --- Tools ---
+# --- Tools Definitions ---
 def get_current_time():
     return datetime.now().strftime("%H:%M:%S")
 
@@ -101,17 +70,13 @@ def write_memory(content: str):
     return "Memorie actualizată."
 
 
-tools = [
+ALL_TOOLS = [
     {
         "type": "function",
         "function": {
             "name": "get_current_time",
             "description": "Returnează ora actuală",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
+            "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
     {
@@ -170,11 +135,7 @@ tools = [
         "function": {
             "name": "read_memory",
             "description": "Citește memoria pe termen lung",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
+            "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
     {
@@ -196,16 +157,96 @@ tools = [
     },
 ]
 
+# Grupare pe categorii pentru injectare dinamică
+TOOL_GROUPS = {
+    "time": [t for t in ALL_TOOLS if t["function"]["name"] == "get_current_time"],
+    "files": [
+        t
+        for t in ALL_TOOLS
+        if t["function"]["name"] in ["list_files", "read_file", "write_file"]
+    ],
+    "memory": [
+        t
+        for t in ALL_TOOLS
+        if t["function"]["name"] in ["read_memory", "write_memory"]
+    ],
+    "skills": [t for t in ALL_TOOLS if t["function"]["name"] == "load_skill"],
+}
+
+
+# --- Smart Router (Fără response_format incompatibil) ---
+def choose_model_and_tools(task: str):
+    router_prompt = """Ești un clasificator rapid de sarcini. Analizează cererea și răspunde EXCLUSIV cu un obiect JSON structurat astfel:
+{
+  "model": "fast" | "general" | "large",
+  "tools": ["time", "files", "memory", "skills"]
+}
+
+Reguli clasificare model:
+- "fast": Întrebări simple, definiții scurte (ex: "Ce este fotosinteza?"), saluturi, cereri de oră/timp.
+- "general": Analize detaliate, explicații lungi, scriere sau debugging de cod.
+- "large": Matematică avansată, algoritmi complecși, refactoring masiv.
+
+Reguli unelte ("tools"):
+- Trece doar categoriile de unelte strict necesare. Dacă nu este nevoie de nicio unealtă, pune lista goală [].
+
+Exemple:
+- "Ce este fotosinteza?": {"model": "fast", "tools": []}
+- "Cât este ceasul?": {"model": "fast", "tools": ["time"]}
+- "Ce ai salvat în memorie?": {"model": "general", "tools": ["memory"]}
+
+Răspunde DOAR cu JSON-ul valid, fără alt text în jur."""
+
+    try:
+        response = client.chat.completions.create(
+            model=MODELS["fast"],
+            messages=[
+                {"role": "system", "content": router_prompt},
+                {"role": "user", "content": task},
+            ],
+            temperature=0.0,
+        )
+
+        raw_content = response.choices[0].message.content.strip()
+
+        # Curățare în caz că modelul întoarce Markdown (```json ... ```)
+        if raw_content.startswith("```"):
+            raw_content = raw_content.split("```")[1]
+            if raw_content.startswith("json"):
+                raw_content = raw_content[4:]
+        raw_content = raw_content.strip()
+
+        data = json.loads(raw_content)
+
+        model_key = data.get("model", "general").lower()
+        selected_model = MODELS.get(model_key, MODELS["general"])
+        selected_categories = data.get("tools", [])
+
+        active_tools = []
+        for cat in selected_categories:
+            if cat in TOOL_GROUPS:
+                active_tools.extend(TOOL_GROUPS[cat])
+
+        tool_names = [t["function"]["name"] for t in active_tools]
+
+        print(f"[Smart Router] Categorie detectată: '{model_key}'")
+        print(f"[Smart Router] Model final ales: {selected_model}")
+        print(
+            f"[Smart Router] Tool-uri filtrate: {tool_names if tool_names else 'Niciunul (0 context irosit)'}\n"
+        )
+
+        return selected_model, active_tools
+
+    except Exception as e:
+        print(f"[Router Warning] Eroare parsare JSON / Fallback pe general: {e}\n")
+        return MODELS["general"], ALL_TOOLS
+
 
 def run_agent(user_message: str):
-    model = choose_model(user_message)
-    print(f"[Smart Router] Model ales de LLM: {model}\n")
+    model, active_tools = choose_model_and_tools(user_message)
 
     system_prompt = """Esti un agent AI cu memorie pe termen lung.
-
-Skill-uri: time, files, coding.
-Folosește load_skill când ai nevoie de detalii.
-Folosește read_memory / write_memory pentru informații persistente.
+Folosește uneltele puse la dispoziție doar când este necesar.
 """
 
     messages = [
@@ -214,12 +255,15 @@ Folosește read_memory / write_memory pentru informații persistente.
     ]
 
     while True:
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            tools=tools,
-            tool_choice="auto",
-        )
+        kwargs = {
+            "model": model,
+            "messages": messages,
+        }
+        if active_tools:
+            kwargs["tools"] = active_tools
+            kwargs["tool_choice"] = "auto"
+
+        response = client.chat.completions.create(**kwargs)
 
         message = response.choices[0].message
         messages.append(message)
@@ -264,7 +308,7 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         user_message = " ".join(sys.argv[1:])
     else:
-        user_message = "Cât este ceasul acum?"
+        user_message = "Ce este fotosinteza?"
 
     print(f"User query: '{user_message}'")
     print(run_agent(user_message))
