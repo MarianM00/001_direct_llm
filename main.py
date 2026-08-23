@@ -8,7 +8,9 @@ client = OpenAI(
     api_key="lm-studio",
 )
 
-# --- Tools existente ---
+MEMORY_FILE = "memory.md"
+
+# --- Tools ---
 def get_current_time():
     return datetime.now().strftime("%H:%M:%S")
 
@@ -29,7 +31,7 @@ def write_file(path, content):
     try:
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
-        return f"Fișierul {path} a fost scris cu succes."
+        return f"Fișierul {path} a fost scris."
     except Exception as e:
         return f"Eroare: {e}"
 
@@ -40,6 +42,17 @@ def load_skill(name: str):
             return f.read()
     except Exception as e:
         return f"Skill inexistent: {e}"
+
+def read_memory():
+    if not os.path.exists(MEMORY_FILE):
+        return "Memoria este goală."
+    with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+        return f.read()
+
+def write_memory(content: str):
+    with open(MEMORY_FILE, "a", encoding="utf-8") as f:
+        f.write(f"\n- {datetime.now().strftime('%Y-%m-%d %H:%M')} | {content}")
+    return "Memorie actualizată."
 
 tools = [
     {
@@ -54,12 +67,10 @@ tools = [
         "type": "function",
         "function": {
             "name": "list_files",
-            "description": "Listează fișierele dintr-un folder",
+            "description": "Listează fișierele",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "path": {"type": "string"}
-                },
+                "properties": {"path": {"type": "string"}},
                 "required": []
             }
         }
@@ -68,12 +79,10 @@ tools = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Citește un fișier text",
+            "description": "Citește un fișier",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "path": {"type": "string"}
-                },
+                "properties": {"path": {"type": "string"}},
                 "required": ["path"]
             }
         }
@@ -82,7 +91,7 @@ tools = [
         "type": "function",
         "function": {
             "name": "write_file",
-            "description": "Scrie într-un fișier text",
+            "description": "Scrie un fișier",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -97,27 +106,44 @@ tools = [
         "type": "function",
         "function": {
             "name": "load_skill",
-            "description": "Încarcă un skill complet după nume (ex: time, files, coding)",
+            "description": "Încarcă un skill (time, files, coding)",
+            "parameters": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}},
+                "required": ["name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_memory",
+            "description": "Citește memoria pe termen lung",
+            "parameters": {"type": "object", "properties": {}, "required": []}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_memory",
+            "description": "Salvează o informație importantă în memorie",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string", "description": "Numele skill-ului fără .md"}
+                    "content": {"type": "string", "description": "Informația de salvat"}
                 },
-                "required": ["name"]
+                "required": ["content"]
             }
         }
     }
 ]
 
 def run_agent(user_message: str):
-    system_prompt = """Esti un agent AI.
+    system_prompt = """Esti un agent AI cu memorie pe termen lung.
 
-Skill-uri disponibile:
-- time → pentru ora
-- files → pentru operații cu fișiere
-- coding → pentru cod
-
-Când ai nevoie de detalii despre un skill, apelează load_skill.
+Skill-uri: time, files, coding.
+Folosește load_skill când ai nevoie de detalii.
+Folosește read_memory / write_memory pentru informații persistente.
 """
 
     messages = [
@@ -153,6 +179,10 @@ Când ai nevoie de detalii despre un skill, apelează load_skill.
                 result = write_file(args.get("path", ""), args.get("content", ""))
             elif name == "load_skill":
                 result = load_skill(args.get("name", ""))
+            elif name == "read_memory":
+                result = read_memory()
+            elif name == "write_memory":
+                result = write_memory(args.get("content", ""))
             else:
                 result = "Tool necunoscut"
 
@@ -163,4 +193,4 @@ Când ai nevoie de detalii despre un skill, apelează load_skill.
             })
 
 if __name__ == "__main__":
-    print(run_agent("Am nevoie de skill-ul de fișiere. Ce pot face cu el?"))
+    print(run_agent("Ce știi despre proiectul meu? Citește memoria, nu mai scrie iar in fisier."))
