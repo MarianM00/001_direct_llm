@@ -4,11 +4,11 @@ import os
 import json
 
 client = OpenAI(
-    base_url="http://100.97.106.90:1234/v1",  # ← IP-ul Tailscale + portul 1234
+    base_url="http://100.97.106.90:1234/v1",
     api_key="lm-studio",
 )
 
-# --- Tools ---
+# --- Tools existente ---
 def get_current_time():
     return datetime.now().strftime("%H:%M:%S")
 
@@ -33,6 +33,14 @@ def write_file(path, content):
     except Exception as e:
         return f"Eroare: {e}"
 
+def load_skill(name: str):
+    path = f"skills/{name}.md"
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        return f"Skill inexistent: {e}"
+
 tools = [
     {
         "type": "function",
@@ -50,7 +58,7 @@ tools = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Calea folderului"}
+                    "path": {"type": "string"}
                 },
                 "required": []
             }
@@ -60,11 +68,11 @@ tools = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Citește conținutul unui fișier text",
+            "description": "Citește un fișier text",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Calea fișierului"}
+                    "path": {"type": "string"}
                 },
                 "required": ["path"]
             }
@@ -74,39 +82,42 @@ tools = [
         "type": "function",
         "function": {
             "name": "write_file",
-            "description": "Scrie conținut într-un fișier text",
+            "description": "Scrie într-un fișier text",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Calea fișierului"},
-                    "content": {"type": "string", "description": "Conținutul de scris"}
+                    "path": {"type": "string"},
+                    "content": {"type": "string"}
                 },
                 "required": ["path", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "load_skill",
+            "description": "Încarcă un skill complet după nume (ex: time, files, coding)",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Numele skill-ului fără .md"}
+                },
+                "required": ["name"]
             }
         }
     }
 ]
 
-# --- Încarcă skill-urile ---
-def load_skills():
-    skills_dir = "skills"
-    if not os.path.exists(skills_dir):
-        return ""
-    
-    content = []
-    for filename in os.listdir(skills_dir):
-        if filename.endswith(".md"):
-            with open(os.path.join(skills_dir, filename), "r", encoding="utf-8") as f:
-                content.append(f"### Skill: {filename}\n{f.read()}")
-    return "\n\n".join(content)
-
 def run_agent(user_message: str):
-    skills = load_skills()
-    
-    system_prompt = f"""Esti un agent AI.
-Foloseste tool-urile cand e nevoie.
+    system_prompt = """Esti un agent AI.
 
-{skills}
+Skill-uri disponibile:
+- time → pentru ora
+- files → pentru operații cu fișiere
+- coding → pentru cod
+
+Când ai nevoie de detalii despre un skill, apelează load_skill.
 """
 
     messages = [
@@ -140,6 +151,8 @@ Foloseste tool-urile cand e nevoie.
                 result = read_file(args.get("path", ""))
             elif name == "write_file":
                 result = write_file(args.get("path", ""), args.get("content", ""))
+            elif name == "load_skill":
+                result = load_skill(args.get("name", ""))
             else:
                 result = "Tool necunoscut"
 
@@ -150,4 +163,4 @@ Foloseste tool-urile cand e nevoie.
             })
 
 if __name__ == "__main__":
-    print(run_agent("Ce skill-uri ai disponibile?"))
+    print(run_agent("Am nevoie de skill-ul de fișiere. Ce pot face cu el?"))
