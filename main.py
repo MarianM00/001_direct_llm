@@ -4,10 +4,11 @@ import os
 import json
 
 client = OpenAI(
-    base_url="http://192.168.100.2:1234/v1",
+    base_url="http://100.97.106.90:1234/v1",  # ← IP-ul Tailscale + portul 1234
     api_key="lm-studio",
 )
 
+# --- Tools ---
 def get_current_time():
     return datetime.now().strftime("%H:%M:%S")
 
@@ -21,6 +22,14 @@ def read_file(path):
     try:
         with open(path, "r", encoding="utf-8") as f:
             return f.read()
+    except Exception as e:
+        return f"Eroare: {e}"
+
+def write_file(path, content):
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return f"Fișierul {path} a fost scris cu succes."
     except Exception as e:
         return f"Eroare: {e}"
 
@@ -60,12 +69,48 @@ tools = [
                 "required": ["path"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_file",
+            "description": "Scrie conținut într-un fișier text",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Calea fișierului"},
+                    "content": {"type": "string", "description": "Conținutul de scris"}
+                },
+                "required": ["path", "content"]
+            }
+        }
     }
 ]
 
+# --- Încarcă skill-urile ---
+def load_skills():
+    skills_dir = "skills"
+    if not os.path.exists(skills_dir):
+        return ""
+    
+    content = []
+    for filename in os.listdir(skills_dir):
+        if filename.endswith(".md"):
+            with open(os.path.join(skills_dir, filename), "r", encoding="utf-8") as f:
+                content.append(f"### Skill: {filename}\n{f.read()}")
+    return "\n\n".join(content)
+
 def run_agent(user_message: str):
+    skills = load_skills()
+    
+    system_prompt = f"""Esti un agent AI.
+Foloseste tool-urile cand e nevoie.
+
+{skills}
+"""
+
     messages = [
-        {"role": "system", "content": "Esti un agent AI. Foloseste tool-urile cand e nevoie."},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_message}
     ]
 
@@ -93,6 +138,8 @@ def run_agent(user_message: str):
                 result = list_files(args.get("path", "."))
             elif name == "read_file":
                 result = read_file(args.get("path", ""))
+            elif name == "write_file":
+                result = write_file(args.get("path", ""), args.get("content", ""))
             else:
                 result = "Tool necunoscut"
 
@@ -103,4 +150,4 @@ def run_agent(user_message: str):
             })
 
 if __name__ == "__main__":
-    print(run_agent("Citește main.py și spune-mi pe scurt ce face."))
+    print(run_agent("Ce skill-uri ai disponibile?"))

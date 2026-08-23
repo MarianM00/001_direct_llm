@@ -1,0 +1,1 @@
+Folosește tool-ul get_current_time când utilizatorul întreabă de oră.

@@ -1,0 +1,1 @@
+Când utilizatorul cere cod, explică și oferă exemple clare.
