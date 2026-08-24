@@ -1,5 +1,7 @@
 import json
 import os
+import re
+import subprocess
 import sys
 from datetime import datetime
 from openai import OpenAI
@@ -9,13 +11,37 @@ client = OpenAI(
     api_key="lm-studio",
 )
 
+HISTORY_FILE = "history.json"
 MEMORY_FILE = "memory.md"
+MAX_STEPS = 6
 
-MODELS = {
-    "fast": "google/gemma-4-e4b",
-    "general": "qwen/qwen3.5-9b",
-    "large": "google/gemma-4-12b-qat",
-}
+
+# --- Managementul Memoriei pe Termen Scurt (History) ---
+def load_history(limit=6):
+    if not os.path.exists(HISTORY_FILE):
+        return []
+    try:
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data[-limit:]
+    except Exception:
+        return []
+
+
+def save_history(user_msg, agent_msg):
+    history = []
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                history = json.load(f)
+        except Exception:
+            history = []
+
+    history.append({"role": "user", "content": user_msg})
+    history.append({"role": "assistant", "content": agent_msg})
+
+    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(history[-20:], f, indent=2, ensure_ascii=False)
 
 
 # --- Tools Definitions ---
@@ -42,9 +68,30 @@ def write_file(path, content):
     try:
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
-        return f"Fișierul {path} a fost scris."
+        return f"Fișierul '{path}' a fost scris cu succes."
     except Exception as e:
-        return f"Eroare: {e}"
+        return f"Eroare la scriere: {e}"
+
+
+def execute_python(path: str):
+    """Execută un fișier Python și returnează STDOUT sau STDERR pentru autocorecție."""
+    if not os.path.exists(path):
+        return f"Eroare: Fișierul '{path}' nu există."
+    try:
+        result = subprocess.run(
+            [sys.executable, path],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return f"✅ Execuție cu succes!\nOutput:\n{result.stdout if result.stdout else '(fără output)'}"
+        else:
+            return f"❌ Eroare la execuție (Code {result.returncode}):\n{result.stderr}"
+    except subprocess.TimeoutExpired:
+        return "❌ Eroare: Scriptul a depășit timpul maxim de execuție (Timeout 10s)."
+    except Exception as e:
+        return f"❌ Eroare neașteptată la execuție: {e}"
 
 
 def load_skill(name: str):
@@ -56,18 +103,30 @@ def load_skill(name: str):
         return f"Skill inexistent: {e}"
 
 
-def read_memory():
+def read_memory(query=""):
     if not os.path.exists(MEMORY_FILE):
         return "Memoria este goală."
-
     with open(MEMORY_FILE, "r", encoding="utf-8") as f:
-        return f.read()
+        content = f.read()
+
+    if not query:
+        return content
+
+    lines = content.split("\n")
+    relevant = [
+        line
+        for line in lines
+        if any(word in line.lower() for word in query.lower().split())
+    ]
+    if relevant:
+        return "Contexte găsite în memorie:\n" + "\n".join(relevant)
+    return f"Memorie citită complet:\n{content}"
 
 
 def write_memory(content: str):
     with open(MEMORY_FILE, "a", encoding="utf-8") as f:
         f.write(f"\n- {datetime.now().strftime('%Y-%m-%d %H:%M')} | {content}")
-    return "Memorie actualizată."
+    return f"Am salvat în memorie: '{content}'"
 
 
 ALL_TOOLS = [
@@ -83,7 +142,7 @@ ALL_TOOLS = [
         "type": "function",
         "function": {
             "name": "list_files",
-            "description": "Listează fișierele",
+            "description": "Listează fișierele din director",
             "parameters": {
                 "type": "object",
                 "properties": {"path": {"type": "string"}},
@@ -107,7 +166,7 @@ ALL_TOOLS = [
         "type": "function",
         "function": {
             "name": "write_file",
-            "description": "Scrie un fișier",
+            "description": "Scrie conținut într-un fișier",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -121,8 +180,25 @@ ALL_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "execute_python",
+            "description": "Execută un fișier script Python local și verifică dacă funcționează fără erori.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Calea către fișierul .py de executat",
+                    }
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "load_skill",
-            "description": "Încarcă un skill (time, files, coding)",
+            "description": "Încarcă un skill specific",
             "parameters": {
                 "type": "object",
                 "properties": {"name": {"type": "string"}},
@@ -134,15 +210,24 @@ ALL_TOOLS = [
         "type": "function",
         "function": {
             "name": "read_memory",
-            "description": "Citește memoria pe termen lung",
-            "parameters": {"type": "object", "properties": {}, "required": []},
+            "description": "Caută sau citește informații din memoria pe termen lung",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Cuvinte cheie de căutat",
+                    }
+                },
+                "required": [],
+            },
         },
     },
     {
         "type": "function",
         "function": {
             "name": "write_memory",
-            "description": "Salvează o informație importantă în memorie",
+            "description": "Salvează o informație importantă în memorie pe termen lung",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -157,13 +242,13 @@ ALL_TOOLS = [
     },
 ]
 
-# Grupare pe categorii pentru injectare dinamică
 TOOL_GROUPS = {
     "time": [t for t in ALL_TOOLS if t["function"]["name"] == "get_current_time"],
     "files": [
         t
         for t in ALL_TOOLS
-        if t["function"]["name"] in ["list_files", "read_file", "write_file"]
+        if t["function"]["name"]
+        in ["list_files", "read_file", "write_file", "execute_python"]
     ],
     "memory": [
         t
@@ -173,29 +258,35 @@ TOOL_GROUPS = {
     "skills": [t for t in ALL_TOOLS if t["function"]["name"] == "load_skill"],
 }
 
-
-# --- Smart Router (Fără response_format incompatibil) ---
-def choose_model_and_tools(task: str):
-    router_prompt = """Ești un clasificator rapid de sarcini. Analizează cererea și răspunde EXCLUSIV cu un obiect JSON structurat astfel:
-{
-  "model": "fast" | "general" | "large",
-  "tools": ["time", "files", "memory", "skills"]
+MODELS = {
+    "fast": "google/gemma-4-e4b",
+    "general": "qwen/qwen3.5-9b",
+    "large": "google/gemma-4-12b-qat",
 }
 
+
+# --- Smart Router (Versiune Îmbunătățită și Robustă) ---
+def choose_model_and_tools(task: str):
+    router_prompt = """Ești un clasificator rapid de sarcini. Analizează cererea și răspunde EXCLUSIV cu un obiect JSON în următorul format:
+{
+  "model": "fast",
+  "tools": ["time"]
+}
+
+Opțiuni valide pentru "model": "fast", "general", "large"
+Opțiuni valide pentru "tools": "time", "files", "memory", "skills"
+
 Reguli clasificare model:
-- "fast": Întrebări simple, definiții scurte (ex: "Ce este fotosinteza?"), saluturi, cereri de oră/timp.
-- "general": Analize detaliate, explicații lungi, scriere sau debugging de cod.
+- "fast": Întrebări simple, conversație generală, explicații teoretice (ex: fotosinteză), oră/timp, salvare/citire simplă din memorie.
+- "general": Analize detaliate, manipulare fișiere, scriere, rulare sau debugging de cod Python.
 - "large": Matematică avansată, algoritmi complecși, refactoring masiv.
 
 Reguli unelte ("tools"):
-- Trece doar categoriile de unelte strict necesare. Dacă nu este nevoie de nicio unealtă, pune lista goală [].
+- Dacă cererea este teoretică sau generală (ex: "Explică fotosinteza"), lista "tools" va fi goliți: [].
+- Dacă cererea cere citirea/salvarea memoriei, adaugă "memory".
+- Dacă cererea cere scriere sau rulare de cod, adaugă "files".
 
-Exemple:
-- "Ce este fotosinteza?": {"model": "fast", "tools": []}
-- "Cât este ceasul?": {"model": "fast", "tools": ["time"]}
-- "Ce ai salvat în memorie?": {"model": "general", "tools": ["memory"]}
-
-Răspunde DOAR cu JSON-ul valid, fără alt text în jur."""
+FOARTE IMPORTANT: Răspunde DOAR cu obiectul JSON raw. Nu adăuga text înainte sau după."""
 
     try:
         response = client.chat.completions.create(
@@ -205,18 +296,18 @@ Răspunde DOAR cu JSON-ul valid, fără alt text în jur."""
                 {"role": "user", "content": task},
             ],
             temperature=0.0,
+            max_tokens=150,
         )
 
         raw_content = response.choices[0].message.content.strip()
 
-        # Curățare în caz că modelul întoarce Markdown (```json ... ```)
-        if raw_content.startswith("```"):
-            raw_content = raw_content.split("```")[1]
-            if raw_content.startswith("json"):
-                raw_content = raw_content[4:]
-        raw_content = raw_content.strip()
-
-        data = json.loads(raw_content)
+        # Extrage cu RegEx exact obiectul JSON dintre { și }
+        match = re.search(r"\{.*\}", raw_content, re.DOTALL)
+        if match:
+            json_str = match.group(0)
+            data = json.loads(json_str)
+        else:
+            raise ValueError(f"Nu s-a găsit un JSON valid în răspuns: {raw_content}")
 
         model_key = data.get("model", "general").lower()
         selected_model = MODELS.get(model_key, MODELS["general"])
@@ -229,86 +320,114 @@ Răspunde DOAR cu JSON-ul valid, fără alt text în jur."""
 
         tool_names = [t["function"]["name"] for t in active_tools]
 
-        print(f"[Smart Router] Categorie detectată: '{model_key}'")
-        print(f"[Smart Router] Model final ales: {selected_model}")
+        print(f"[Smart Router] Categorie: '{model_key}' | Model: {selected_model}")
         print(
-            f"[Smart Router] Tool-uri filtrate: {tool_names if tool_names else 'Niciunul (0 context irosit)'}\n"
+            f"[Smart Router] Tool-uri active: {tool_names if tool_names else 'Niciunul'}\n"
         )
 
         return selected_model, active_tools
 
     except Exception as e:
-        print(f"[Router Warning] Eroare parsare JSON / Fallback pe general: {e}\n")
+        print(f"[Router Warning] Fallback pe general: {e}\n")
         return MODELS["general"], ALL_TOOLS
 
 
+# --- ReAct Execution Engine + Self-Correction Loop ---
 def run_agent(user_message: str):
     model, active_tools = choose_model_and_tools(user_message)
+    short_term_history = load_history(limit=4)
 
-    system_prompt = """Esti un agent AI cu memorie pe termen lung.
-Folosește uneltele puse la dispoziție doar când este necesar.
-"""
+    system_prompt = """Ești un agent autonom bazat pe ReAct (Reasoning + Acting) cu autocorecție.
+Când scrii sau editezi scripturi Python:
+1. Scrie codul în fișier folosind 'write_file'.
+2. Execută ÎNTOTDEAUNA fișierul folosind 'execute_python' pentru a valida că funcționează.
+3. Dacă întâmpini erori la execuție, citește erorile, înțelege ce s-a întâmplat, scrie varianta corectată și execută din nou (Auto-Correction).
+4. Oferă răspunsul final doar când codul a fost testat și funcționează cu succes.
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_message},
-    ]
+Fii concis și direct."""
 
-    while True:
+    messages = [{"role": "system", "content": system_prompt}]
+    if short_term_history:
+        messages.extend(short_term_history)
+
+    messages.append({"role": "user", "content": user_message})
+
+    step = 1
+    final_answer = ""
+
+    while step <= MAX_STEPS:
+        print(f"--- [Pasul {step}/{MAX_STEPS}] ---")
+
         kwargs = {
             "model": model,
             "messages": messages,
+            "max_tokens": 700,
         }
         if active_tools:
             kwargs["tools"] = active_tools
             kwargs["tool_choice"] = "auto"
 
         response = client.chat.completions.create(**kwargs)
-
         message = response.choices[0].message
         messages.append(message)
 
-        if not message.tool_calls:
-            return message.content
+        if message.tool_calls:
+            if message.content:
+                print(f"🧠 [Thought]: {message.content}")
 
-        for tool_call in message.tool_calls:
-            name = tool_call.function.name
-            args = json.loads(tool_call.function.arguments or "{}")
+            for tool_call in message.tool_calls:
+                name = tool_call.function.name
+                args = json.loads(tool_call.function.arguments or "{}")
 
-            if name == "get_current_time":
-                result = get_current_time()
-            elif name == "list_files":
-                result = list_files(args.get("path", "."))
-            elif name == "read_file":
-                result = read_file(args.get("path", ""))
-            elif name == "write_file":
-                result = write_file(
-                    args.get("path", ""),
-                    args.get("content", ""),
+                print(f"⚙️ [Action]: Apelează '{name}' cu argumentele: {args}")
+
+                if name == "get_current_time":
+                    result = get_current_time()
+                elif name == "list_files":
+                    result = list_files(args.get("path", "."))
+                elif name == "read_file":
+                    result = read_file(args.get("path", ""))
+                elif name == "write_file":
+                    result = write_file(
+                        args.get("path", ""), args.get("content", "")
+                    )
+                elif name == "execute_python":
+                    result = execute_python(args.get("path", ""))
+                elif name == "load_skill":
+                    result = load_skill(args.get("name", ""))
+                elif name == "read_memory":
+                    result = read_memory(args.get("query", ""))
+                elif name == "write_memory":
+                    result = write_memory(args.get("content", ""))
+                else:
+                    result = "Tool necunoscut"
+
+                print(f"👁️ [Observation]: {result}\n")
+
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": str(result),
+                    }
                 )
-            elif name == "load_skill":
-                result = load_skill(args.get("name", ""))
-            elif name == "read_memory":
-                result = read_memory()
-            elif name == "write_memory":
-                result = write_memory(args.get("content", ""))
-            else:
-                result = "Tool necunoscut"
+            step += 1
+        else:
+            print("🏁 [Final Answer]:")
+            final_answer = message.content or "Sarcina a fost finalizată."
+            save_history(user_message, final_answer)
+            return final_answer
 
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": str(result),
-                }
-            )
+    final_answer = "❌ S-a atins limita maximă de pași fără un răspuns final."
+    save_history(user_message, final_answer)
+    return final_answer
 
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         user_message = " ".join(sys.argv[1:])
     else:
-        user_message = "Ce este fotosinteza?"
+        user_message = "Creează un fișier test.py care să calculeze al 10-lea număr Fibonacci și să-l afișeze, apoi execută-l."
 
-    print(f"User query: '{user_message}'")
+    print(f"User query: '{user_message}'\n")
     print(run_agent(user_message))
