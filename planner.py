@@ -48,10 +48,22 @@ Răspunde DOAR cu obiectul JSON:"""
         )
 
         raw = response.choices[0].message.content.strip()
+
+        print("\n--- [DEBUG] RĂSPUNS BRUT DE LA GEMMA ---")
+        print(raw)
+        print("------------------------------------------\n")
+
         raw_clean = re.sub(r"```(?:json)?", "", raw).replace("```", "").strip()
         match = re.search(r"\{.*\}", raw_clean, re.DOTALL)
         if match:
-            return json.loads(match.group(0)).get("steps", [])
+            steps = json.loads(match.group(0)).get("steps", [])
+            if not steps:
+                print("⚠️ Obiectul JSON a fost găsit, dar cheia 'steps' este goală sau lipsesc pașii!")
+            return steps
+        else:
+            print("⚠️ Regex-ul nu a găsit niciun obiect JSON între acolade {}!")
+
     except Exception as e:
         print(f"❌ [Planner Error]: {e}")
+        
     return []
