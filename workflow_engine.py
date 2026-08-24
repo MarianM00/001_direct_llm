@@ -1,6 +1,6 @@
 # workflow_engine.py
 from dataclasses import dataclass, field
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Callable, Optional
 import os
 
 from agents.system_agent import SystemAgent
@@ -50,7 +50,14 @@ class SequentialWorkflowEngine:
         ]
         return any(keyword in res_str for keyword in critical_errors)
 
-    def run_pipeline(self, steps: List[Dict[str, str]], user_goal: str, log_callback=None) -> WorkflowState:
+    def run_pipeline(
+        self, 
+        steps: List[Dict[str, str]], 
+        user_goal: str, 
+        log_callback: Optional[Callable[[str], None]] = None,
+        status_callback: Optional[Callable[[str], None]] = None
+    ) -> WorkflowState:
+        
         state = WorkflowState(user_goal=user_goal)
         
         def log(msg: str):
@@ -58,12 +65,19 @@ class SequentialWorkflowEngine:
             if log_callback:
                 log_callback(msg)
 
+        def set_active_agent(agent_name: str):
+            if status_callback:
+                status_callback(agent_name)
+
         log(f"🚀 [Workflow Engine] Start Pipeline cu Self-Correction pentru: '{user_goal}'")
 
         for i, step in enumerate(steps, 1):
-            agent_type = step["agent"]
+            agent_type = step["agent"].lower()
             specific_task = step["task"]
             step_name = f"Pasul_{i}_{agent_type}"
+
+            # 🟢 Trimite statusul live către UI
+            set_active_agent(agent_type)
 
             log(f"\n🔄 [Workflow Step {i}/{len(steps)}] -> Agent: [{agent_type.upper()}]")
             log(f"🎯 Sarcina: {specific_task}")
@@ -113,6 +127,9 @@ class SequentialWorkflowEngine:
                 state.errors.append(error_msg)
                 log(f"💥 {error_msg}")
                 break
+
+        # ⚪ Resetează statusul tuturor agenților la Idle la final
+        set_active_agent("idle")
 
         log("\n🏁 [Workflow Engine] Pipeline completat!")
         return state
