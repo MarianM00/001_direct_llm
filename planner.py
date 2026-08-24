@@ -12,42 +12,35 @@ client = OpenAI(
 PLANNER_MODEL = "google/gemma-4-e4b"
 
 def create_plan(user_query: str) -> List[Dict[str, str]]:
-    """Descompune o cerere complexă într-un plan de execuție secvențial clar și robust."""
-    
-    prompt = f"""Ești un Planner/Orchestrator expert pentru un sistem multi-agent.
-Sarcina ta este să analizezi cererea utilizatorului și să o descompui în pași logici secvențiali.
+    prompt = f"""Ești un Planner expert pentru un sistem multi-agent.
+Sarcina ta este să descompui cererea utilizatorului în pași logici executabili.
 
 Agenți disponibili:
-- "system": Inspectează fișiere/directoare sau obține ora curentă.
-- "coding": Creează, editează, refactorizează SAU execută cod Python.
-- "research": Caută în memorie sau salvează note/informații în memoria pe termen lung.
+- "system": Poate rula `list_files` ȘI `get_current_time`. Dacă cererea cere fișiere SAU timpul/ora, folosește agentul system pentru ambele!
+- "coding": Creează sau execută fișiere Python.
+- "research": Salvează în memorie.
 
-Reguli de planificare:
-1. Dacă cererea implică scrierea și executarea unui script, SEPARĂ procesul în doi pași 'coding':
-   - Pasul A: Creează scriptul Python.
-   - Pasul B: Execută scriptul Python creat.
-2. Păstrează sarcinile simple și directe.
-3. Răspunde EXCLUSIV cu un obiect JSON valid.
+REGULĂ IMPORTANTĂ:
+Dacă utilizatorul cere ceva legat de ORA și FIȘIERE, primul pas (system) trebuie să obțină ATÂT ora cât ȘI fișierele!
 
-Exemplu format răspuns:
+Format JSON de răspuns:
 {{
   "steps": [
-    {{"agent": "system", "task": "Află lista fișierelor și ora curentă."}},
-    {{"agent": "coding", "task": "Creează scriptul gen_ora.py."}},
+    {{"agent": "system", "task": "Obține lista fișierelor din director ȘI ora curentă din sistem."}},
+    {{"agent": "coding", "task": "Creează scriptul gen_ora.py care scrie ora și fișierele obținute în ora.txt."}},
     {{"agent": "coding", "task": "Execută scriptul gen_ora.py."}},
-    {{"agent": "research", "task": "Salvează în memorie faptul că gen_ora.py a fost creat și executat."}}
+    {{"agent": "research", "task": "Salvează în memorie generarea fișierului ora.txt."}}
   ]
 }}
 
-Cererea utilizatorului: "{user_query}"
-
+Cerere utilizator: "{user_query}"
 Răspunde DOAR cu obiectul JSON:"""
 
     try:
         response = client.chat.completions.create(
             model=PLANNER_MODEL,
             messages=[
-                {"role": "system", "content": "You output JSON only. Keep steps clear and modular."},
+                {"role": "system", "content": "You output JSON only."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.1,
@@ -56,15 +49,9 @@ Răspunde DOAR cu obiectul JSON:"""
 
         raw = response.choices[0].message.content.strip()
         raw_clean = re.sub(r"```(?:json)?", "", raw).replace("```", "").strip()
-        
         match = re.search(r"\{.*\}", raw_clean, re.DOTALL)
         if match:
-            data = json.loads(match.group(0))
-            return data.get("steps", [])
-        else:
-            print(f"⚠️ [Planner Debug] Nu s-a găsit JSON valid în răspuns:\n{raw}")
-            
+            return json.loads(match.group(0)).get("steps", [])
     except Exception as e:
         print(f"❌ [Planner Error]: {e}")
-    
     return []

@@ -2,10 +2,10 @@
 from dataclasses import dataclass, field
 from typing import Dict, Any, List
 
-# Importăm CLASELE din fiecare modul
 from agents.system_agent import SystemAgent
 from agents.coding_agent import CodingAgent
 from agents.research_agent import ResearchAgent
+from context_manager import ContextManager
 
 
 @dataclass
@@ -15,23 +15,11 @@ class WorkflowState:
     step_results: Dict[str, Any] = field(default_factory=dict)
     errors: List[str] = field(default_factory=list)
 
-    def get_summary_context(self) -> str:
-        """Formatează istoricul pașilor anteriori sub formă de context pentru următorul agent."""
-        if not self.step_results:
-            return ""
-        
-        context = "\n--- CONTEXT DIN PAȘII ANTERIORI ---\n"
-        for step_name, result in self.step_results.items():
-            context += f" Pasul [{step_name}]:\n{result}\n"
-        context += "-----------------------------------\n"
-        return context
-
 
 class SequentialWorkflowEngine:
-    """Orchestrator care rulează o serie de agenți secvențial."""
+    """Orchestrator care rulează agenții secvențial cu Context Management avansat."""
     
     def __init__(self):
-        # Instanțiem agenții direct
         self.agent_registry = {
             "system": SystemAgent(),
             "coding": CodingAgent(),
@@ -39,7 +27,6 @@ class SequentialWorkflowEngine:
         }
 
     def _execute_agent(self, agent_instance, prompt: str):
-        """Apelează metoda corectă de rulare a agentului (run sau execute)."""
         if hasattr(agent_instance, "run"):
             return agent_instance.run(prompt)
         elif hasattr(agent_instance, "execute"):
@@ -47,10 +34,9 @@ class SequentialWorkflowEngine:
         elif callable(agent_instance):
             return agent_instance(prompt)
         else:
-            raise AttributeError(f"Agentul {type(agent_instance).__name__} nu are o metodă 'run' sau 'execute'.")
+            raise AttributeError(f"Agentul {type(agent_instance).__name__} nu are o metodă validă de execuție.")
 
     def run_pipeline(self, steps: List[Dict[str, str]], user_goal: str) -> WorkflowState:
-        """Execută un lanț de agenți definiți în `steps`."""
         state = WorkflowState(user_goal=user_goal)
         print(f"\n🚀 [Workflow Engine] Start Pipeline pentru obiectivul: '{user_goal}'\n" + "="*70)
 
@@ -68,8 +54,11 @@ class SequentialWorkflowEngine:
                 print(f"❌ {error_msg}")
                 break
 
-            # Construim prompt-ul concatenând sarcina curentă cu contextul acumulat
-            combined_prompt = f"{specific_task}\nIMPORTANT: Folosește obligatoriu action/tool-urile disponibile pentru a executa efectiv sarcina, nu doar răspunde cu text!\n{state.get_summary_context()}"
+            # 1. GENERĂM CONTEXTUL STRUCTURAT (Context Management)
+            formatted_context = ContextManager.format_context_for_agent(state.step_results)
+
+            # 2. CONSTRUIM PROMPT-UL ACTIONABIL (Evită halucinațiile)
+            combined_prompt = ContextManager.build_actionable_prompt(specific_task, formatted_context)
 
             try:
                 agent = self.agent_registry[agent_type]
