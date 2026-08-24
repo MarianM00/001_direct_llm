@@ -1,9 +1,9 @@
-# app.py
 import os
 import time
+import glob
 import streamlit as st
 
-from planner import create_plan
+from planner import create_plan, PLANNER_MODEL
 from workflow_engine import SequentialWorkflowEngine
 
 # Configurare Pagină
@@ -13,7 +13,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Custom CSS pentru Carduri Elegante
+# Custom CSS pentru Carduri & Interfață Pro
 st.markdown("""
 <style>
     .agent-card {
@@ -48,6 +48,13 @@ st.markdown("""
         border-left: 4px solid #6366f1;
         font-size: 15px;
         line-height: 1.6;
+    }
+    .artifact-card {
+        background-color: #181b24;
+        border: 1px solid #374151;
+        border-radius: 8px;
+        padding: 12px;
+        margin-bottom: 12px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -86,6 +93,15 @@ def render_agent_cards(active_agent_name: str = "idle"):
             </div>
             """, unsafe_allow_html=True)
 
+def get_workspace_files():
+    """Returnează un dicționar cu fișierele din workspace și timestamp-ul ultimei modificări."""
+    files = {}
+    extensions = ['*.txt', '*.py', '*.json', '*.csv', '*.md', '*.log']
+    for ext in extensions:
+        for filepath in glob.glob(ext):
+            files[filepath] = os.path.getmtime(filepath)
+    return files
+
 # Afișăm inițial toate cardurile pe "Idle"
 render_agent_cards("idle")
 
@@ -99,6 +115,7 @@ user_prompt = st.text_input(
 
 if st.button("🚀 Lansare Pipeline", type="primary"):
     start_time = time.time()
+    initial_files = get_workspace_files()
     
     # 1. PLANNER ACTIVE
     render_agent_cards("planner")
@@ -127,7 +144,6 @@ if st.button("🚀 Lansare Pipeline", type="primary"):
         log_container.code("\n".join(logs_list), language="text")
 
     def live_status_update(agent_type: str):
-        """Această funcție va fi apelată din Workflow Engine la fiecare pas."""
         render_agent_cards(agent_type)
 
     engine = SequentialWorkflowEngine(max_retries=3, auto_approve=True)
@@ -143,15 +159,23 @@ if st.button("🚀 Lansare Pipeline", type="primary"):
     # Resetăm agenții la Idle după finalizare
     render_agent_cards("idle")
     exec_time = round(time.time() - start_time, 2)
+    has_errors = len(getattr(final_state, 'errors', [])) > 0
+    pipeline_status = "❌ Failed" if has_errors else "✅ Completed"
 
-    # 3. REZULTAT FINAL FORMATAT
+    # 3. METRICS BAR COMPLETĂ
+    st.divider()
+    st.subheader("📊 System Metrics & Performance")
+    
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Status Pipeline", pipeline_status)
+    m2.metric("Timp Execuție Total", f"{exec_time}s")
+    m3.metric("Pași Executați", f"{len(steps)}")
+    m4.metric("Model Utilizat", PLANNER_MODEL.split("/")[-1] if "/" in PLANNER_MODEL else PLANNER_MODEL)
+
+    # 4. REZULTAT FINAL FORMATAT
     st.divider()
     st.subheader("✨ Rezultat Final (Formatted Output)")
     
-    m1, m2 = st.columns(2)
-    m1.metric("Timp Execuție Total", f"{exec_time}s")
-    m2.metric("Pași Executați", f"{len(steps)}")
-
     for step_key, result_text in final_state.step_results.items():
         clean_text = str(result_text).replace("\\n", "\n")
         
@@ -159,3 +183,41 @@ if st.button("🚀 Lansare Pipeline", type="primary"):
             st.markdown(f"### 📌 Output `{step_key}`")
             st.markdown(f'<div class="output-box">{clean_text}</div>', unsafe_allow_html=True)
             st.write("")
+
+    # 5. FORMATTED ARTIFACTS VIEWER
+    current_files = get_workspace_files()
+    # Identificăm fișierele noi sau modificate în timpul acestei rulări
+    created_or_modified = [
+        f for f, mtime in current_files.items()
+        if f not in initial_files or mtime > start_time
+    ]
+
+    if created_or_modified:
+        st.divider()
+        st.subheader("📁 Generated Artifacts & Files")
+        st.info(f"S-au detectat **{len(created_or_modified)}** fișiere create sau modificate în timpul execuției.")
+        
+        for file_path in created_or_modified:
+            file_name = os.path.basename(file_path)
+            file_ext = os.path.splitext(file_name)[1].replace(".", "")
+            
+            # Determinăm limbajul pentru Syntax Highlighting
+            lang_map = {"py": "python", "json": "json", "md": "markdown", "csv": "csv", "txt": "text"}
+            syntax_lang = lang_map.get(file_ext, "text")
+
+            with st.expander(f"📄 Fișier: `{file_name}`", expanded=True):
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        file_content = f.read()
+
+                    st.code(file_content, language=syntax_lang)
+                    
+                    st.download_button(
+                        label=f"⬇️ Descarcă {file_name}",
+                        data=file_content,
+                        file_name=file_name,
+                        mime="text/plain",
+                        key=f"dl_{file_name}"
+                    )
+                except Exception as e:
+                    st.error(f"Nu s-a putut citi fișierul {file_name}: {e}")
