@@ -69,7 +69,7 @@ class SequentialWorkflowEngine:
                 break
 
             # Construim prompt-ul concatenând sarcina curentă cu contextul acumulat
-            combined_prompt = f"{specific_task}\nIMPORTANT: Folosește action/tool-urile disponibile pentru a executa efectiv sarcina!\n{state.get_summary_context()}"
+            combined_prompt = f"{specific_task}\nIMPORTANT: Folosește obligatoriu action/tool-urile disponibile pentru a executa efectiv sarcina, nu doar răspunde cu text!\n{state.get_summary_context()}"
 
             try:
                 agent = self.agent_registry[agent_type]

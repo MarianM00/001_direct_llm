@@ -12,26 +12,30 @@ client = OpenAI(
 PLANNER_MODEL = "google/gemma-4-e4b"
 
 def create_plan(user_query: str) -> List[Dict[str, str]]:
-    """Descompune o cerere complexă într-un plan de execuție secvențial pentru agenți."""
+    """Descompune o cerere complexă într-un plan de execuție secvențial clar și robust."""
     
     prompt = f"""Ești un Planner/Orchestrator expert pentru un sistem multi-agent.
-Sarcina ta este să analizezi cererea utilizatorului și să o descompui într-o serie de pași logici secvențiali.
+Sarcina ta este să analizezi cererea utilizatorului și să o descompui în pași logici secvențiali.
 
 Agenți disponibili:
-- "system": Pentru inspectat fișiere, directoare sau aflarea orei curente.
-- "coding": Pentru creare, editare, refactoring și execuție de cod Python.
-- "research": Pentru căutare în memorie sau salvarea preferințelor/notițelor în memorie.
+- "system": Inspectează fișiere/directoare sau obține ora curentă.
+- "coding": Creează, editează, refactorizează SAU execută cod Python.
+- "research": Caută în memorie sau salvează note/informații în memoria pe termen lung.
 
-Reguli:
-1. Răspunde EXCLUSIV cu un obiect JSON valid într-o singură linie sau pe un singur rand pentru fiecare proprietate string.
-2. Descrierea "task" trebuie să fie scurtă și concisă (sub 15 cuvinte).
+Reguli de planificare:
+1. Dacă cererea implică scrierea și executarea unui script, SEPARĂ procesul în doi pași 'coding':
+   - Pasul A: Creează scriptul Python.
+   - Pasul B: Execută scriptul Python creat.
+2. Păstrează sarcinile simple și directe.
+3. Răspunde EXCLUSIV cu un obiect JSON valid.
 
-Exemplu format raspuns:
+Exemplu format răspuns:
 {{
   "steps": [
-    {{"agent": "system", "task": "Află fișierele din director și ora curentă."}},
-    {{"agent": "coding", "task": "Scrie și execută scriptul gen_info.py pentru a crea info.txt."}},
-    {{"agent": "research", "task": "Salvează în memorie faptul că info.txt a fost creat."}}
+    {{"agent": "system", "task": "Află lista fișierelor și ora curentă."}},
+    {{"agent": "coding", "task": "Creează scriptul gen_ora.py."}},
+    {{"agent": "coding", "task": "Execută scriptul gen_ora.py."}},
+    {{"agent": "research", "task": "Salvează în memorie faptul că gen_ora.py a fost creat și executat."}}
   ]
 }}
 
@@ -43,32 +47,24 @@ Răspunde DOAR cu obiectul JSON:"""
         response = client.chat.completions.create(
             model=PLANNER_MODEL,
             messages=[
-                {"role": "system", "content": "You output valid JSON only. Keep string values concise and on a single line."},
+                {"role": "system", "content": "You output JSON only. Keep steps clear and modular."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.1,
-            max_tokens=1000  # Mărit pentru a evita tăierea răspunsului
+            max_tokens=1000
         )
 
         raw = response.choices[0].message.content.strip()
-        
-        # Curățăm blocuri de markdown ```json ... ```
         raw_clean = re.sub(r"```(?:json)?", "", raw).replace("```", "").strip()
         
-        # Înlocuim liniile noi reale din interiorul răspunsului pentru a nu bloca json.loads
-        # (înlocuiește no-line breaks stricați dacă există)
         match = re.search(r"\{.*\}", raw_clean, re.DOTALL)
         if match:
-            json_str = match.group(0)
-            # Încercăm să parsăm JSON-ul
-            data = json.loads(json_str)
+            data = json.loads(match.group(0))
             return data.get("steps", [])
         else:
-            print(f"⚠️ [Planner Debug] Nu s-a găsit JSON în răspuns. Răspuns brut:\n{raw}")
+            print(f"⚠️ [Planner Debug] Nu s-a găsit JSON valid în răspuns:\n{raw}")
             
     except Exception as e:
         print(f"❌ [Planner Error]: {e}")
-        if 'raw' in locals():
-            print(f"⚠️ Răspunsul brut a fost:\n{raw}")
     
     return []
