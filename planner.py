@@ -20,8 +20,10 @@ Agenți disponibili:
 - "coding": Creează sau execută fișiere Python.
 - "research": Salvează în memorie.
 
-REGULĂ IMPORTANTĂ:
-Dacă utilizatorul cere ceva legat de ORA și FIȘIERE, primul pas (system) trebuie să obțină ATÂT ora cât ȘI fișierele!
+REGULI IMPORTANTE:
+1. Dacă utilizatorul cere ceva legat de ORA și FIȘIERE, primul pas (system) trebuie să obțină ATÂT ora cât ȘI fișierele!
+2. Dacă cererea este un salut ("Salut", "Ce faci", "Bună") sau o întrebare generală/conversațională:
+   Returnează un singur pas pentru agentul "system" sau "research" care să răspundă scurt și politicos la conversație!
 
 Format JSON de răspuns:
 {{

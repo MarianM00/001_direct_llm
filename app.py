@@ -1,74 +1,127 @@
-# app.py
 import os
+import time
 import streamlit as st
 
 from planner import create_plan
 from workflow_engine import SequentialWorkflowEngine
 
-# Setări pagină
+# Configurare Pagină
 st.set_page_config(
-    page_title="Multi-Agent AI Control Center",
-    page_icon="🤖",
+    page_title="Agent System Dashboard",
+    page_icon="⚡",
     layout="wide"
 )
 
-st.title("🤖 Multi-Agent AI System Dashboard")
-st.caption("Arhitectură autonomă cu Planner, System, Coding & Research Agents + Self-Correction")
+# Custom CSS pentru a-l apropia de design-ul din imagine (Dark Minimalist Cards)
+st.markdown("""
+<style>
+    .agent-card {
+        background-color: #1e222d;
+        border: 1px solid #2e3440;
+        border-radius: 10px;
+        padding: 15px;
+        text-align: center;
+        margin-bottom: 10px;
+    }
+    .status-active {
+        color: #4CAF50;
+        font-weight: bold;
+    }
+    .status-idle {
+        color: #888888;
+    }
+    .output-box {
+        background-color: #14161d;
+        border-radius: 8px;
+        padding: 20px;
+        border-left: 4px solid #4F46E5;
+        font-size: 15px;
+        line-height: 1.6;
+    }
+</style>
+""", unsafe_allow_html=True)
 
-# Sidebar
-with st.sidebar:
-    st.header("⚙️ Setări Pipeline")
-    max_retries = st.number_input("Max Retries (Self-Correction)", min_value=1, max_value=5, value=3)
-    auto_approve = st.checkbox("Auto-Approve Actions", value=True)
-    
-    st.divider()
-    st.header("📁 Workspace Inspector")
-    files = [f for f in os.listdir(".") if not f.startswith(".")]
-    selected_file = st.selectbox("Alege un fișier:", sorted(files))
-    
-    if selected_file and os.path.isfile(selected_file):
-        with st.expander(f"📄 {selected_file}"):
-            try:
-                with open(selected_file, "r", encoding="utf-8") as f:
-                    st.code(f.read(), language="python" if selected_file.endswith(".py") else "text")
-            except Exception as e:
-                st.error(f"Eroare citire: {e}")
+st.title("⚡ Multi-Agent Control Center")
 
-# Zona Principală
-user_prompt = st.text_area(
-    "💬 Introduceți sarcina pentru agenți:",
-    value="Vezi ce fișiere am în director, creează un script numit gen_ora.py care scrie ora și fișierele găsite într-un fișier ora.txt și execută-l, iar la final salvează în memorie că am creat ora.txt.",
-    height=100
+# --- TOP PANEL: AGENT STATUS CARDS ---
+st.subheader("🤖 Your Agent Team")
+
+# Inițializăm starea agenților
+active_agent = st.session_state.get("active_agent", "None")
+
+col_router, col_system, col_coding, col_research = st.columns(4)
+
+with col_router:
+    is_act = active_agent == "planner"
+    st.markdown(f"""
+    <div class="agent-card">
+        <h3>🧠 Planner</h3>
+        <p class="{ 'status-active' if is_act else 'status-idle' }">{ '● Active' if is_act else '○ Idle' }</p>
+        <small>Routing & Task Decomposition</small>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col_system:
+    is_act = active_agent == "system"
+    st.markdown(f"""
+    <div class="agent-card">
+        <h3>⚙️ System</h3>
+        <p class="{ 'status-active' if is_act else 'status-idle' }">{ '● Active' if is_act else '○ Idle' }</p>
+        <small>OS Operations & Environment</small>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col_coding:
+    is_act = active_agent == "coding"
+    st.markdown(f"""
+    <div class="agent-card">
+        <h3>💻 Coding</h3>
+        <p class="{ 'status-active' if is_act else 'status-idle' }">{ '● Active' if is_act else '○ Idle' }</p>
+        <small>Python Execution & Logic</small>
+    </div>
+    """, unsafe_allow_html=True)
+
+with col_research:
+    is_act = active_agent == "research"
+    st.markdown(f"""
+    <div class="agent-card">
+        <h3>📚 Research</h3>
+        <p class="{ 'status-active' if is_act else 'status-idle' }">{ '● Active' if is_act else '○ Idle' }</p>
+        <small>Memory & Context Storage</small>
+    </div>
+    """, unsafe_allow_html=True)
+
+st.divider()
+
+# --- INPUT SECTION ---
+user_prompt = st.text_input(
+    "💬 Introduceți sarcina sau mesajul pentru agenți:",
+    value="Arată-mi ce fișiere am în director și spune-mi ora curentă."
 )
 
-col1, _ = st.columns([1, 4])
-with col1:
-    start_btn = st.button("🚀 Lansare Pipeline", type="primary", use_container_width=True)
-
-if start_btn and user_prompt:
-    st.divider()
+if st.button("🚀 Lansare Pipeline", type="primary"):
+    start_time = time.time()
     
-    # 1. Generare Plan
-    with st.status("🧠 [Planner] Analizez cererea și generez planul...", expanded=True) as status:
-        try:
-            steps = create_plan(user_prompt)
-        except Exception as err:
-            steps = []
-            st.error(f"❌ Eroare la apelarea Planner-ului: {err}")
+    # Setăm status planner
+    st.session_state["active_agent"] = "planner"
+    
+    # 1. PLANNER
+    with st.spinner("Planner-ul analizează..."):
+        steps = create_plan(user_prompt)
 
-        if not steps:
-            st.error("⚠️ Planner-ul a returnat un plan gol! Verifică log-ul din terminal pentru `❌ [Planner Error]` (Ex: Nume model incorect sau server oprit).")
-            status.update(label="❌ Generare plan eșuată", state="error", expanded=True)
-            st.stop()
-        
-        st.subheader("📋 Plan de Execuție Generat:")
-        for idx, step in enumerate(steps, 1):
-            st.markdown(f"**Pasul {idx}** `[{step['agent'].upper()}]`: {step['task']}")
-        
-        status.update(label="✅ Plan generat cu succes!", state="complete", expanded=False)
+    if not steps:
+        st.warning("💬 Niciun pas de execuție generat (Conversație simplă sau răspuns direct).")
+        st.session_state["active_agent"] = "None"
+        st.stop()
 
-    # 2. Console Logs
-    st.subheader("⚙️ Live Agent Execution Console")
+    st.subheader("📋 Plan de Execuție")
+    for idx, step in enumerate(steps, 1):
+        st.caption(f"Pasul {idx} **[{step['agent'].upper()}]**: {step['task']}")
+
+    # 2. EXECUTION ENGINE
+    st.divider()
+    st.subheader("⚙️ Live Execution Console")
+    
     log_container = st.empty()
     logs_list = []
 
@@ -76,17 +129,28 @@ if start_btn and user_prompt:
         logs_list.append(msg)
         log_container.code("\n".join(logs_list), language="text")
 
-    # 3. Engine Run
-    engine = SequentialWorkflowEngine(max_retries=max_retries, auto_approve=auto_approve)
+    engine = SequentialWorkflowEngine(max_retries=3, auto_approve=True)
     
-    with st.spinner("🤖 Agenții lucrează..."):
-        final_state = engine.run_pipeline(steps, user_prompt, log_callback=stream_logger)
+    # Rulăm pipeline-ul
+    final_state = engine.run_pipeline(steps, user_prompt, log_callback=stream_logger)
+    
+    st.session_state["active_agent"] = "None"
+    exec_time = round(time.time() - start_time, 2)
 
-    # 4. Results
+    # 3. AFISARE REZULTATE ELEGANTE (Curățate de \n)
     st.divider()
-    if final_state.errors:
-        st.error(f"❌ Pipeline-ul s-a încheiat cu erori: {final_state.errors}")
-    else:
-        st.success("🎉 Toți pașii au fost executați cu succes!")
-        with st.expander("📊 Rezultate detaliate"):
-            st.json(final_state.step_results)
+    st.subheader("✨ Rezultat Final (Formatted Output)")
+    
+    # Metrică de performanță
+    col1, col2 = st.columns(2)
+    col1.metric("Timp Execuție", f"{exec_time}s")
+    col2.metric("Pași Executați", f"{len(steps)}")
+
+    # Afișăm rezultatele frumos, decodificând character-ele de escape (\n)
+    for step_key, result_text in final_state.step_results.items():
+        # Înlocuim caracterul textual '\n' cu enter real
+        clean_text = str(result_text).replace("\\n", "\n")
+        
+        with st.container():
+            st.markdown(f"### 📌 Output {step_key}")
+            st.markdown(f'<div class="output-box">{clean_text}</div>', unsafe_allow_html=True)
