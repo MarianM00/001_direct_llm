@@ -1,0 +1,11 @@
+# System Information Report
+# Generated: 2026-08-24 12:27:32
+============================================================
+timestamp: 2026-08-24 12:27:32
+working_directory: /Users/marinmarian/personal-ai/experiments/001_direct_llm
+python_version: 3.15.0
+platform: posix
+cwd_exists: True
+============================================================
+
+# End of Report
