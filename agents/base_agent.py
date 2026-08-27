@@ -10,7 +10,7 @@ class BaseAgent:
         self.tools = tools
         self.max_steps = max_steps
         self.client = OpenAI(
-            base_url="http://100.97.106.90:1234/v1",
+            base_url="http://YOURIP:PORT/v1",
             api_key="lm-studio",
         )
         self.tool_map = {}
